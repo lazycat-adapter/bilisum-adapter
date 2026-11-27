@@ -1,5 +1,5 @@
 package: cloud.lazycat.app.bilisum1
-version: 1.19.2
+version: 1.21.3
 name: BiliSum
 description: AI 视频总结与知识库工具，支持 B 站与本地视频的转写、摘要、知识笔记和知识库检索。
 author: lycohana

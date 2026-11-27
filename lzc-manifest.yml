@@ -2,7 +2,6 @@ usage: |
   登录懒猫微服后，打开 BiliSum 即可进入自己的实例。已有账号仍可使用懒猫 OIDC 登录。
   从 1.19.2 升级时，如果提示确认身份，请用原懒猫账号登录一次以关联历史对话。
   数据保存在 /lzcapp/var/data，授权文稿写入后可导出到个人网盘的 BiliSum Exports 目录。
-
 application:
   subdomain: bilisum
   multi_instance: true
@@ -100,10 +99,10 @@ application:
             hooks:
               fileSystemAccess: true
               fileInput: true
-
 services:
   bilisum:
-    image: registry.lazycat.cloud/edward/lazycat_9527/bilisum:5551af52b741087f
+    # upstream: ttl.sh/lazycat-bilisum-1a09d30a6b1b:24h@sha256:867306f400e018b0fad8d8d80353a773e327357cb482403bec6911ef8bcdd847
+    image: registry.lazycat.cloud/peter/lazycat-bilisum-1a09d30a6b1b:de17be2e0fd49c04
     binds:
       - /lzcapp/var/data:/data
       - /lzcapp/run/mnt/home:/lzcapp/run/mnt/home
