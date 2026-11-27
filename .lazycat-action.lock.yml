@@ -6,7 +6,7 @@ source:
     revision: 2ce5409a3a843729781cde203d3627cad77a1a17
     tag: v1.21.3
 fingerprint: sha256:1a09d30a6b1b2ece355cf5a1d711d56488159ca77dd4c18084dac0e58ef7d1ff
-status: packaged
+status: submitted
 images:
     - id: bilisum
       source_ref: ttl.sh/lazycat-bilisum-1a09d30a6b1b:24h@sha256:867306f400e018b0fad8d8d80353a773e327357cb482403bec6911ef8bcdd847
@@ -49,3 +49,18 @@ application:
 
         **完整变更**：[v1.21.1…v1.21.3](https://github.com/lycohana/BiliSum/compare/v1.21.1...v1.21.3)
 packaged_at: 2026-11-27T07:51:56.401303192Z
+reviews:
+    - id: 24084
+      source:
+        kind: git
+        version: 1.21.3
+        ref: refs/tags/v1.21.3
+        revision: 2ce5409a3a843729781cde203d3627cad77a1a17
+        tag: v1.21.3
+      fingerprint: sha256:1a09d30a6b1b2ece355cf5a1d711d56488159ca77dd4c18084dac0e58ef7d1ff
+      application_version: 1.21.3
+      lpk_sha256: d3e14db334fe1f130fd2bb5c2eede8757c7a31b9e4e5e86fc27cce09ee3e5fc8
+      status: waiting
+      created_at: 2026-11-27T07:52:20.676Z
+      submitted_at: 2026-11-27T07:52:20.811616142Z
+      checked_at: 2026-11-27T07:52:20.811616651Z
