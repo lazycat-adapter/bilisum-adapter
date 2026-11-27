@@ -1,0 +1,13 @@
+DELETE /api/v1/knowledge/conversations/{conversation_id}
+GET /api/v1/auth/status
+GET /api/v1/knowledge/conversations
+GET /api/v1/knowledge/conversations/{conversation_id}
+GET /api/v1/knowledge/conversations/{conversation_id}/messages
+GET /api/v1/knowledge/jobs/{job_id}
+PATCH /api/v1/knowledge/conversations/{conversation_id}
+POST /api/v1/auth/session
+POST /api/v1/knowledge/ask
+POST /api/v1/knowledge/ask/stream
+POST /api/v1/knowledge/conversations
+POST /api/v1/knowledge/conversations/{conversation_id}/ask/stream
+POST /api/v1/knowledge/jobs/{job_id}/reaggregate

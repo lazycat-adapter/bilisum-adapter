@@ -1,0 +1,138 @@
+usage: |
+  登录懒猫微服后，打开 BiliSum 即可进入自己的实例。已有账号仍可使用懒猫 OIDC 登录。
+  从 1.19.2 升级时，如果提示确认身份，请用原懒猫账号登录一次以关联历史对话。
+  数据保存在 /lzcapp/var/data，授权文稿写入后可导出到个人网盘的 BiliSum Exports 目录。
+
+application:
+  subdomain: bilisum
+  multi_instance: true
+  oidc_redirect_path: /api/v1/auth/oidc/callback
+  routes:
+    - /=http://bilisum:3838/
+  injects:
+    # Only the gateway sees this deployment secret. Strip client headers even when SAFE_UID is missing.
+    - id: bilisum-auth-gateway
+      "on": request
+      auth_required: false
+      when:
+        - /api/v1/*
+      do:
+        - params:
+            grant: '{{ stable_secret (printf "bilisum_inject_grant_%s" .S.DeployUID) }}'
+          src: |
+            ctx.headers.del("X-Bilisum-Grant");
+            ctx.headers.del("X-Bilisum-Uid");
+            if (!ctx.safe_uid) {
+              ctx.response.send(401, "LazyCat login required");
+              return;
+            }
+            ctx.headers.set("X-Bilisum-Uid", ctx.safe_uid);
+            ctx.headers.set("X-Bilisum-Grant", ctx.params.grant);
+    - id: bilisum-login
+      "on": browser
+      auth_required: true
+      when:
+        - /
+        - /videos/*
+        - /settings
+        - /settings/*
+        - /knowledge
+        - /knowledge/*
+      do:
+        - src: file:///lzcapp/pkg/content/login-compat/session.js
+          params:
+            statusPath: /api/v1/auth/status
+            sessionPath: /api/v1/auth/session
+            oidcPath: /api/v1/auth/oidc/login
+    - id: lazycat-file-bridge
+      "on": request
+      auth_required: true
+      when:
+        - /__lazycat_file_bridge/*
+      do:
+        - params:
+            appDomain: '{{ .S.AppDomain }}'
+            boxDomain: '{{ .S.BoxDomain }}'
+          src: |
+            const bridgePrefix = "/__lazycat_file_bridge";
+            const requestHost = String(ctx.request.host || "")
+              .split(":")[0]
+              .toLowerCase();
+            const appHost = String(ctx.params.appDomain).toLowerCase();
+            const boxDomain = String(ctx.params.boxDomain).toLowerCase();
+            const method = String(ctx.request.method || "").toUpperCase();
+
+            if (
+              requestHost !== appHost ||
+              !appHost.endsWith("." + boxDomain) ||
+              !["GET", "HEAD", "PUT"].includes(method)
+            ) {
+              ctx.response.send(
+                ["GET", "HEAD", "PUT"].includes(method) ? 400 : 405,
+                "Invalid LazyCat file bridge request",
+              );
+              return;
+            }
+
+            const fileOrigin = "https://file." + boxDomain;
+            const targetPath =
+              "/files/home" + ctx.request.path.slice(bridgePrefix.length);
+
+            ctx.headers.del("Origin");
+            ctx.headers.del("Referer");
+            ctx.proxy.to(fileOrigin, {
+              path: targetPath,
+              query: ctx.request.raw_query,
+              use_target_host: true,
+              timeout_ms: 120000,
+              on_fail: "error",
+            });
+    - id: bilisum-file-chooser
+      "on": browser
+      when:
+        - /*
+      auth_required: true
+      do:
+        - src: file:///lzcapp/pkg/content/lazycat-injects/lzc-file-chooser-inject.js
+          params:
+            diskRoot: /_lzc/files/home
+            locale: auto
+            hooks:
+              fileSystemAccess: true
+              fileInput: true
+
+services:
+  bilisum:
+    image: registry.lazycat.cloud/edward/lazycat_9527/bilisum:5551af52b741087f
+    binds:
+      - /lzcapp/var/data:/data
+      - /lzcapp/run/mnt/home:/lzcapp/run/mnt/home
+    environment:
+      - VIDEO_SUM_DOCKER=1
+      - VIDEO_SUM_HOST=0.0.0.0
+      - VIDEO_SUM_PORT=3838
+      - VIDEO_SUM_APP_DATA_ROOT=/data
+      - VIDEO_SUM_DATA_DIR=/data
+      - VIDEO_SUM_CACHE_DIR=/data/cache
+      - VIDEO_SUM_TASKS_DIR=/data/tasks
+      - VIDEO_SUM_DATABASE_URL=sqlite:////data/video_sum.db
+      - VIDEO_SUM_OUTPUT_DIR=/lzcapp/run/mnt/home/BiliSum Exports
+      - BILISUM_DEPLOY_UID={{ .S.DeployUID }}
+      - BILISUM_INJECT_SECRET={{ stable_secret (printf "bilisum_inject_grant_%s" .S.DeployUID) }}
+      - VIDEO_SUM_SESSION_SECRET={{ stable_secret "session_secret" }}
+      - VIDEO_SUM_OIDC_REDIRECT_URI=https://{{ .S.AppDomain }}/api/v1/auth/oidc/callback
+      - LAZYCAT_AUTH_OIDC_CLIENT_ID=${LAZYCAT_AUTH_OIDC_CLIENT_ID}
+      - LAZYCAT_AUTH_OIDC_CLIENT_SECRET=${LAZYCAT_AUTH_OIDC_CLIENT_SECRET}
+      - LAZYCAT_AUTH_OIDC_ISSUER_URI=${LAZYCAT_AUTH_OIDC_ISSUER_URI}
+      - LAZYCAT_AUTH_OIDC_AUTH_URI=${LAZYCAT_AUTH_OIDC_AUTH_URI}
+      - LAZYCAT_AUTH_OIDC_TOKEN_URI=${LAZYCAT_AUTH_OIDC_TOKEN_URI}
+      - LAZYCAT_AUTH_OIDC_USERINFO_URI=${LAZYCAT_AUTH_OIDC_USERINFO_URI}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3838/health', timeout=5).read()"
+      start_period: 60s
+      start_interval: 1s
+      interval: 30s
+      timeout: 5s
+      retries: 3

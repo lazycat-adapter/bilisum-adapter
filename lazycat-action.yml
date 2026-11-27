@@ -1,0 +1,55 @@
+version: 2
+
+project:
+  root: .
+  build_config: lzc-build.yml
+  package_file: package.yml
+  output: dist/cloud.lazycat.app.bilisum1.lpk
+  target_arch: amd64
+
+source:
+  kind: git
+  url: https://github.com/lycohana/BiliSum.git
+  select:
+    strategy: semver-tag
+    channel: stable
+    tag_regex: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+
+changelog:
+  mode: github-release
+  git_url: https://github.com/lycohana/BiliSum.git
+
+state:
+  file: .lazycat-action.lock.yml
+
+update:
+  strategy: publish
+  allow_downgrade: false
+
+build:
+  run_buildscript: true
+  prepare:
+    mode: command
+    context: image
+    command: python3 -B scripts/prepare.py
+    output_image: 'ttl.sh/lazycat-bilisum-{fingerprint}:24h'
+
+images:
+  - id: bilisum
+    target: service
+    service: bilisum
+    source: docker.io/lycohana/bilisum:{source_version}
+    delivery:
+      mode: lazycat
+
+stores:
+  official:
+    enabled: true
+    create_if_missing: false
+    skip_if_version_exists: true
+    continue_if_newer_version: true
+    retry:
+      enabled: true
+      max_attempts: 5
+      initial_delay: 2s
+      max_delay: 30s

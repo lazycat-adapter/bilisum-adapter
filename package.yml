@@ -1,0 +1,32 @@
+package: cloud.lazycat.app.bilisum1
+version: 1.19.2
+name: BiliSum
+description: AI 视频总结与知识库工具，支持 B 站与本地视频的转写、摘要、知识笔记和知识库检索。
+author: lycohana
+license: MIT
+homepage: https://github.com/lycohana/BiliSum
+min_os_version: 1.5.0
+permissions:
+  required:
+    - net.internet
+  optional:
+    - document.write
+unsupported_platforms:
+  - ios
+  - android
+  - tvos
+locales:
+  zh-CN:
+    usage: |
+      登录懒猫微服后，打开 BiliSum 即可进入自己的实例。已有账号仍可使用懒猫 OIDC 登录。
+      从 1.19.2 升级时，如果提示确认身份，请用原懒猫账号登录一次以关联历史对话。
+      数据保存在 /lzcapp/var/data，授权文稿写入后可导出到个人网盘的 BiliSum Exports 目录。
+    name: BiliSum
+    description: AI 视频总结与知识库工具，支持 B 站与本地视频的转写、摘要、知识笔记和知识库检索。
+  en-US:
+    name: BiliSum
+    usage: |
+      Sign in to your LazyCat device and open BiliSum. Existing users can also sign in with LazyCat OIDC.
+      After upgrading from 1.19.2, use your original LazyCat account once if prompted to link your conversation history.
+      Data is stored in /lzcapp/var/data. Grant document write access to export to BiliSum Exports on your personal drive.
+    description: AI video summarizer and knowledge base for Bilibili and local media.

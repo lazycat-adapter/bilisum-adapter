@@ -1,0 +1,8 @@
+dist/
+.lazycat-action/
+.lazycat-artifact/
+__pycache__/
+*.py[cod]
+*.lpk
+.env
+.env.*

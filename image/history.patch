@@ -1,0 +1,180 @@
+diff --git a/knowledge/conversation_service.py b/knowledge/conversation_service.py
+index e9c794f..530f373 100644
+--- a/knowledge/conversation_service.py
++++ b/knowledge/conversation_service.py
+@@ -41,8 +41,11 @@ def _model_or_404(repository: SqliteTaskRepository, conversation_id: str) -> Kno
+     return KnowledgeConversationResponse.model_validate(payload)
+ 
+ 
+-def list_conversations(repository: SqliteTaskRepository, limit: int = 50) -> list[KnowledgeConversationResponse]:
+-    return [KnowledgeConversationResponse.model_validate(item) for item in repository.list_knowledge_conversations(limit)]
++def list_conversations(
++    repository: SqliteTaskRepository, limit: int = 50, *, owner_id: str | None = None
++) -> list[KnowledgeConversationResponse]:
++    records = repository.list_knowledge_conversations(limit, owner_id=owner_id)
++    return [KnowledgeConversationResponse.model_validate(item) for item in records]
+ 
+ 
+ def get_conversation(repository: SqliteTaskRepository, conversation_id: str) -> KnowledgeConversationResponse:
+diff --git a/repository.py b/repository.py
+index 17fa285..a347823 100644
+--- a/repository.py
++++ b/repository.py
+@@ -8,6 +8,7 @@ from uuid import uuid4
+ 
+ from video_sum_core.models.tasks import TaskInput, TaskResult, TaskStatus
+ from video_sum_infra.db import sqlite_cursor
++from video_sum_service.history_compat import migrate_legacy_messages, prepare_history_migration
+ from video_sum_service.schemas import (
+     KnowledgeIndexChunkRecord,
+     TaskEventRecord,
+@@ -31,6 +32,7 @@ class SqliteTaskRepository:
+ 
+     def initialize(self) -> None:
+         with self._lock, sqlite_cursor(self._connection) as cursor:
++            legacy_history = prepare_history_migration(cursor)
+             cursor.execute(
+                 """
+                 CREATE TABLE IF NOT EXISTS video_assets (
+@@ -342,6 +344,7 @@ class SqliteTaskRepository:
+                 """
+                 CREATE TABLE IF NOT EXISTS knowledge_conversations (
+                     conversation_id TEXT PRIMARY KEY,
++                    owner_id TEXT NOT NULL DEFAULT '',
+                     title TEXT NOT NULL,
+                     created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL,
+@@ -375,6 +378,12 @@ class SqliteTaskRepository:
+                 ON knowledge_messages(conversation_id, sequence)
+                 """
+             )
++            cursor.execute(
++                """CREATE INDEX IF NOT EXISTS idx_knowledge_conversations_owner_updated
++                ON knowledge_conversations (owner_id, updated_at DESC)"""
++            )
++            if legacy_history:
++                migrate_legacy_messages(cursor)
+             cursor.execute(
+                 """
+                 CREATE TABLE IF NOT EXISTS knowledge_jobs (
+@@ -845,24 +854,25 @@ class SqliteTaskRepository:
+                 jobs.append(job)
+         return jobs
+ 
+-    def create_knowledge_conversation(self, title: str | None = None) -> dict[str, object]:
++    def create_knowledge_conversation(self, title: str | None = None, *, owner_id: str = "") -> dict[str, object]:
+         now = datetime.now(timezone.utc).isoformat()
+         conversation_id = uuid4().hex
+         clean_title = str(title or "新会话").strip()[:120] or "新会话"
+         with self._lock, sqlite_cursor(self._connection) as cursor:
+             cursor.execute(
+                 """
+-                INSERT INTO knowledge_conversations (conversation_id, title, created_at, updated_at, last_message_at)
+-                VALUES (?, ?, ?, ?, NULL)
++                INSERT INTO knowledge_conversations (conversation_id, owner_id, title, created_at, updated_at, last_message_at)
++                VALUES (?, ?, ?, ?, ?, NULL)
+                 """,
+-                (conversation_id, clean_title, now, now),
++                (conversation_id, owner_id, clean_title, now, now),
+             )
+         return self.get_knowledge_conversation(conversation_id) or {}
+ 
+-    def list_knowledge_conversations(self, limit: int = 50) -> list[dict[str, object]]:
++    def list_knowledge_conversations(self, limit: int = 50, *, owner_id: str | None = None) -> list[dict[str, object]]:
++        owner_filter = "WHERE c.owner_id = :owner" if owner_id is not None else ""
+         with self._lock, sqlite_cursor(self._connection) as cursor:
+             rows = cursor.execute(
+-                """
++                f"""
+                 SELECT c.conversation_id, c.title, c.created_at, c.updated_at, c.last_message_at,
+                        COUNT(m.message_id) AS message_count,
+                        COALESCE((
+@@ -872,14 +882,31 @@ class SqliteTaskRepository:
+                        ), '') AS preview
+                 FROM knowledge_conversations c
+                 LEFT JOIN knowledge_messages m ON m.conversation_id = c.conversation_id
++                {owner_filter}
+                 GROUP BY c.conversation_id
+                 ORDER BY COALESCE(c.last_message_at, c.updated_at) DESC
+-                LIMIT ?
++                LIMIT :limit
+                 """,
+-                (max(1, min(int(limit), 200)),),
++                {"owner": owner_id, "limit": max(1, min(int(limit), 200))},
+             ).fetchall()
+         return [self._row_to_knowledge_conversation(row) for row in rows]
+ 
++    def owns_knowledge_conversation(self, owner_id: str, conversation_id: str) -> bool:
++        with self._lock, sqlite_cursor(self._connection) as cursor:
++            return cursor.execute(
++                "SELECT 1 FROM knowledge_conversations WHERE owner_id = ? AND conversation_id = ?",
++                (owner_id, conversation_id),
++            ).fetchone() is not None
++
++    def owns_knowledge_job(self, owner_id: str, job_id: str) -> bool:
++        with self._lock, sqlite_cursor(self._connection) as cursor:
++            return cursor.execute(
++                """SELECT 1 FROM knowledge_jobs j
++                JOIN knowledge_conversations c ON c.conversation_id = j.conversation_id
++                WHERE c.owner_id = ? AND j.job_id = ?""",
++                (owner_id, job_id),
++            ).fetchone() is not None
++
+     def get_knowledge_conversation(self, conversation_id: str) -> dict[str, object] | None:
+         with self._lock, sqlite_cursor(self._connection) as cursor:
+             row = cursor.execute(
+diff --git a/routers/knowledge.py b/routers/knowledge.py
+index 6688fdf..46e670f 100644
+--- a/routers/knowledge.py
++++ b/routers/knowledge.py
+@@ -6,9 +6,10 @@ from queue import Empty, Queue
+ from threading import BoundedSemaphore, Event, Thread
+ from typing import TYPE_CHECKING
+ 
+-from fastapi import APIRouter, HTTPException, Query, Request
++from fastapi import APIRouter, Depends, HTTPException, Query, Request
+ from fastapi.responses import StreamingResponse
+ 
++from video_sum_service.auth_compat import actor_for_request
+ from video_sum_service.context import settings_manager
+ from video_sum_service.knowledge.conversation_service import (
+     get_conversation,
+@@ -49,7 +50,21 @@ if TYPE_CHECKING:
+     from video_sum_service.knowledge.rag_service import RagService
+     from video_sum_service.knowledge.tag_service import TagService
+ 
+-router = APIRouter(prefix="/api/v1/knowledge")
++
++def require_history_owner(request: Request) -> None:
++    conversation_id = request.path_params.get("conversation_id")
++    if conversation_id is not None and not request.app.state.task_repository.owns_knowledge_conversation(
++        actor_for_request(request), conversation_id
++    ):
++        raise HTTPException(status_code=404, detail="会话不存在。")
++    job_id = request.path_params.get("job_id")
++    if job_id is not None and not request.app.state.task_repository.owns_knowledge_job(
++        actor_for_request(request), job_id
++    ):
++        raise HTTPException(status_code=404, detail="任务不存在。")
++
++
++router = APIRouter(prefix="/api/v1/knowledge", dependencies=[Depends(require_history_owner)])
+ _QUEUE_TIMEOUT = object()
+ _ASK_STREAM_SEMAPHORE = BoundedSemaphore(2)
+ 
+@@ -146,13 +161,13 @@ def _get_job_coordinator(request: Request) -> KnowledgeJobCoordinator:
+ 
+ @router.get("/conversations", response_model=list[KnowledgeConversationResponse])
+ def get_knowledge_conversations(request: Request, limit: int = Query(default=50, ge=1, le=200)) -> list[KnowledgeConversationResponse]:
+-    return list_conversations(request.app.state.task_repository, limit)
++    return list_conversations(request.app.state.task_repository, limit, owner_id=actor_for_request(request))
+ 
+ 
+ @router.post("/conversations", response_model=KnowledgeConversationResponse, status_code=201)
+ def create_knowledge_conversation(body: KnowledgeConversationCreateRequest, request: Request) -> KnowledgeConversationResponse:
+     repository: SqliteTaskRepository = request.app.state.task_repository
+-    payload = repository.create_knowledge_conversation(body.title)
++    payload = repository.create_knowledge_conversation(body.title, owner_id=actor_for_request(request))
+     return KnowledgeConversationResponse.model_validate(payload)
+ 
+ 

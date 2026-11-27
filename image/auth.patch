@@ -1,0 +1,115 @@
+--- a/auth.py
++++ b/auth.py
+@@ -38,7 +38,7 @@
+     def verify(self, candidate: str | None) -> bool:
+         expected = self.get_token()
+         provided = str(candidate or "").strip()
+-        return bool(provided) and hmac.compare_digest(provided, expected)
++        return bool(provided) and hmac.compare_digest(provided.encode(), expected.encode())
+ 
+     def _load_or_create_token(self) -> str:
+         token_path = self.token_file
+@@ -76,7 +76,10 @@
+ 
+ 
+ def is_auth_exempt_path(path: str, method: str = "GET") -> bool:
+-    if path in {"/health", "/api/v1/auth/status", "/api/v1/auth/session"}:
++    if path in {
++        "/health", "/api/v1/auth/status", "/api/v1/auth/session", "/api/v1/auth/auto-session",
++        "/api/v1/auth/oidc/login", "/api/v1/auth/oidc/callback", "/api/v1/auth/logout",
++    }:
+         return True
+     if path == "/" or path.startswith("/static/") or path.startswith("/media/"):
+         return True
+@@ -92,11 +95,9 @@
+ 
+ 
+ def request_is_authorized(request: Request, manager: AccessTokenManager) -> bool:
+-    bearer = extract_bearer_token(request)
+-    if manager.verify(bearer):
+-        return True
+-    cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
+-    return manager.verify(cookie_token)
++    from video_sum_service.auth_compat import authenticated
++
++    return authenticated(request, manager)
+ 
+ 
+ def unauthorized_response() -> JSONResponse:
+--- a/routers/system.py
++++ b/routers/system.py
+@@ -2,7 +2,7 @@
+ import re
+ import threading
+ 
+-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
++from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
+ from fastapi.responses import JSONResponse
+ from video_sum_core.models.tasks import TaskStatus
+ from video_sum_infra.prompt_library import (
+@@ -25,8 +25,13 @@
+ from video_sum_service.auth import (
+     describe_token_source,
+     extract_bearer_token,
+-    request_is_authorized,
+     set_session_cookie,
++)
++from video_sum_service.auth_compat import (
++    auth_status,
++    auto_session,
++    clear_personal_cookies,
++    router as lazycat_auth_router,
+ )
+ from video_sum_service.bilibili_cookies import (
+     capture_bilibili_cookies_from_browser,
+@@ -74,6 +79,7 @@
+ from video_sum_service.settings_manager import SettingsUpdatePayload
+ 
+ router = APIRouter(prefix="/api/v1")
++router.include_router(lazycat_auth_router)
+ LATEST_RELEASE_URL = "https://api.github.com/repos/lycohana/BiliSum/releases/latest"
+ BUILTIN_PROMPT_PRESET_IDS = {preset.id for preset in BUILTIN_PRESETS}
+ 
+@@ -324,15 +330,18 @@
+ 
+ 
+ @router.get("/auth/status")
+-def get_auth_status(request: Request) -> dict[str, object]:
++def get_auth_status(request: Request, response: Response) -> dict[str, object]:
++    response.headers["Cache-Control"] = "no-store"
+     return {
+         **describe_token_source(access_token_manager),
+-        "authenticated": request_is_authorized(request, access_token_manager),
++        **auth_status(request, access_token_manager),
+     }
+ 
+ 
+ @router.post("/auth/session")
+ def create_auth_session(request: Request) -> JSONResponse:
++    if request.headers.get("x-requested-with") == "LazyCat-Login" and "authorization" not in request.headers:
++        return auto_session(request)
+     token = extract_bearer_token(request)
+     if not access_token_manager.verify(token):
+         raise HTTPException(status_code=401, detail="访问密钥无效。")
+@@ -342,6 +351,7 @@
+             **describe_token_source(access_token_manager),
+         }
+     )
++    clear_personal_cookies(response)
+     set_session_cookie(response, token or "")
+     return response
+ 
+--- a/app.py
++++ b/app.py
+@@ -113,6 +113,11 @@
+     repository.initialize()
+     app.state.task_repository = repository
+     app.state.db_connection = connection
++    # PUT /settings can select a database for the next restart. Bind identity
++    # operations to the actual main database opened for this repository.
++    app.state.auth_database_file = connection.execute(
++        "SELECT file FROM pragma_database_list WHERE name = 'main'"
++    ).fetchone()[0]
+     app.state.settings_manager = settings_manager
+     knowledge_job_coordinator = KnowledgeJobCoordinator(repository, current_settings)
+     knowledge_job_coordinator.start()

@@ -1,0 +1,18 @@
+# Imported from the original store LPK. The adapter has not submitted a review yet.
+version: 2
+source:
+  kind: git
+  version: 1.19.2
+  ref: refs/tags/v1.19.2
+  revision: 73eebcb6f26efe434c83c4c9dfa1bb175b791c7f
+  tag: v1.19.2
+status: packaged
+images:
+  - id: bilisum
+    source_ref: registry.lazycat.cloud/edward/lazycat_9527/bilisum:5551af52b741087f@sha256:5551af52b741087fc105f5cee00c637f8f80e03436409171f8ae7f779c0eb6b2
+    source_digest: sha256:5551af52b741087fc105f5cee00c637f8f80e03436409171f8ae7f779c0eb6b2
+    runtime_ref: registry.lazycat.cloud/edward/lazycat_9527/bilisum:5551af52b741087f
+application:
+  package: cloud.lazycat.app.bilisum1
+  version: 1.19.2
+  lpk_sha256: 47dce370a3431fecc1c5b2c1539b4194094024d134f14519a1f91ac4ded65a7c

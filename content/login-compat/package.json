@@ -1,0 +1,8 @@
+{
+  "name": "@lazycat-adapter/login-compat",
+  "version": "1.0.0",
+  "description": "LazyCat browser inject for same-origin session login with explicit legacy OIDC fallback",
+  "files": ["session.js"],
+  "main": "session.js",
+  "private": true
+}
