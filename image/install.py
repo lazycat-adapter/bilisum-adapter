@@ -1,4 +1,4 @@
-"""Install both patches in all copies of BiliSum's service package during the Docker build."""
+"""Install the adapter patches in all copies of BiliSum's service package during the Docker build."""
 
 from difflib import unified_diff
 from importlib.util import find_spec
@@ -56,10 +56,11 @@ def main():
     for directory in dict.fromkeys((installed, source)):
         if not (directory / "app.py").is_file():
             raise SystemExit(f"Missing BiliSum service at {directory}")
-        for feature in ("auth", "history"):
+        for feature in ("auth", "history", "runtime"):
             patch = ADAPTER / f"{feature}.patch"
             command = ["patch", "--batch", "--forward", "--fuzz=0", "--no-backup-if-mismatch", "-p1", "-i", str(patch)]
             subprocess.run(command, cwd=directory, check=True)
+        for feature in ("auth", "history"):
             module = f"{feature}_compat.py"
             if (directory / module).exists():
                 raise SystemExit(f"Upstream now supplies {directory / module}; review the adapter")

@@ -126,7 +126,7 @@ def main():
         "--mount", f"type=bind,source={ROOT / 'tests'},target=/tests,readonly",
         "--mount", f"type=bind,source={ROOT / 'image'},target=/image,readonly",
         "--workdir", "/tests", "--entrypoint", "python", image_id,
-        "-B", "-m", "unittest", "-v", "test_auth", "test_history", "test_route_guard",
+        "-B", "-m", "unittest", "-v", "test_auth", "test_history", "test_route_guard", "test_runtime_probe",
     ], check=True)
     subprocess.run(["python3", "scripts/test_image.py", image_id], check=True,
                    env={**os.environ, "LAZYCAT_SOURCE_VERSION": version})

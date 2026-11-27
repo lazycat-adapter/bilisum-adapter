@@ -1,0 +1,32 @@
+--- a/runtime_support.py
++++ b/runtime_support.py
+@@ -660,7 +660,8 @@
+     if str(entry.get("runtimeChannel") or runtime_channel) != runtime_channel:
+         return False
+     if uses_current_service_python(runtime_channel):
+-        return True
++        # Earlier images may have persisted a failed cold-start probe.
++        return bool(entry.get("runtimeReady"))
+     python_executable = runtime_python_executable(runtime_channel)
+     if not entry.get("runtimeReady"):
+         return python_executable is None
+@@ -1949,7 +1950,8 @@
+ 
+     probe_failed = False
+     try:
+-        result = probe_runner([str(python_executable), "-c", script], timeout=120)
++        # Reading the ML libraries on a cold microserver disk can take several minutes.
++        result = probe_runner([str(python_executable), "-c", script], timeout=600)
+         payload = json.loads(result.stdout.strip() or "{}")
+         payload["ffmpegLocation"] = str(ffmpeg_location() or "")
+         _environment_probe_failures.pop(active_channel, None)
+@@ -2066,7 +2068,8 @@
+     payload["knowledgeDependenciesError"] = str(payload.get("knowledgeDependenciesError") or "")
+     apply_knowledge_dependency_policy(payload)
+     payload["runtimeError"] = str(payload.get("runtimeError") or "")
+-    _store_cached_environment_probe(active_channel, payload)
++    if not probe_failed:
++        _store_cached_environment_probe(active_channel, payload)
+     return payload
+ 
+ 
