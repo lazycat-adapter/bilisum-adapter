@@ -117,12 +117,30 @@ def service(image, name, volume, network, env):
         docker("rm","-fv",container)
 
 
-def verify(candidate):
+def baseline_available():
+    if subprocess.run(["docker", "image", "inspect", BASELINE], capture_output=True).returncode == 0:
+        return True
+    pull = subprocess.run(["docker", "pull", BASELINE], capture_output=True, text=True)
+    if pull.returncode == 0:
+        return True
+    message = (pull.stderr + pull.stdout).lower()
+    if any(reason in message for reason in ("no basic auth credentials", "unauthorized", "authentication required", "pull access denied", "denied: requested access")):
+        print("Old registry denied this runner access. Replaying the verified 1.19.2 synthetic database.", flush=True)
+        return False
+    raise RuntimeError("Could not fetch the pinned BiliSum baseline: " + pull.stderr.strip())
+
+
+def verify(candidate, fixture_mode=None):
+    from legacy_fixture import record, restore
+    live = fixture_mode != "--fixture" and baseline_available()
+    if fixture_mode == "--record-fixture" and not live:
+        raise RuntimeError("Recording requires the actual pinned 1.19.2 image")
+    signing_key = secrets.token_hex(32)
     prefix = "bilisum-check-" + secrets.token_hex(5)
     grant = secrets.token_urlsafe(32)
     env = []
     for k, v in {
-        "BILISUM_DEPLOY_UID":"box-a", "BILISUM_INJECT_SECRET":grant, "VIDEO_SUM_SESSION_SECRET":secrets.token_hex(32),
+        "BILISUM_DEPLOY_UID":"box-a", "BILISUM_INJECT_SECRET":grant, "VIDEO_SUM_SESSION_SECRET":signing_key,
         "VIDEO_SUM_OIDC_REDIRECT_URI":"https://app.test/api/v1/auth/oidc/callback",
         "LAZYCAT_AUTH_OIDC_CLIENT_ID":"test-client","LAZYCAT_AUTH_OIDC_CLIENT_SECRET":"fixture",
         "LAZYCAT_AUTH_OIDC_ISSUER_URI":"http://issuer:8099","LAZYCAT_AUTH_OIDC_AUTH_URI":"http://issuer:8099/auth",
@@ -142,24 +160,30 @@ def verify(candidate):
                         "-v",str(Path(__file__).resolve())+":/fixture.py:ro",
                         "--entrypoint","python",candidate,"/fixture.py","issuer")
         resources.callback(docker,"rm","-fv",issuer)
-        with service(BASELINE, prefix+"-old", volumes[0],prefix,env) as base:
-            alice.base = bob.base = base
-            shared = Client(grant, "box-a")
-            shared.base = base
-            shared.request(AUTH + "status")
-            legacy_key = docker("exec", prefix+"-old", "python", "-c",
-                                "import json; print(json.load(open('/data/auth.json'))['access_token'])")
-            shared.request(AUTH + "session", 200, "POST", headers={"Authorization":"Bearer " + legacy_key})
-            shared_id = shared.request(CONVERSATIONS, 200, "POST", {"title":"shared-key history"})["conversation_id"]
-            ids = {}
-            for client, subject in ((alice,"alice"),(bob,"bob")):
-                client.oidc(subject)
-                conv = client.request(CONVERSATIONS,200,"POST",{"title":subject})
-                cid = conv["conversation_id"]
-                ids[subject] = cid
-                messages = [{"id":subject+str(i),"role":role,"content":subject+"-"+role}
-                            for i,role in enumerate(("user","assistant"))]
-                client.request(CONVERSATIONS+"/"+cid,200,"PUT",{"title":subject,"messages":messages})
+        shared = Client(grant, "box-a")
+        clients = {"alice": alice, "bob": bob}
+        if live:
+            with service(BASELINE, prefix+"-old", volumes[0],prefix,env) as base:
+                alice.base = bob.base = base
+                shared.base = base
+                shared.request(AUTH + "status")
+                legacy_key = docker("exec", prefix+"-old", "python", "-c",
+                                    "import json; print(json.load(open('/data/auth.json'))['access_token'])")
+                shared.request(AUTH + "session", 200, "POST", headers={"Authorization":"Bearer " + legacy_key})
+                shared_id = shared.request(CONVERSATIONS, 200, "POST", {"title":"shared-key history"})["conversation_id"]
+                ids = {}
+                for client, subject in ((alice,"alice"),(bob,"bob")):
+                    client.oidc(subject)
+                    conv = client.request(CONVERSATIONS,200,"POST",{"title":subject})
+                    cid = conv["conversation_id"]
+                    ids[subject] = cid
+                    messages = [{"id":subject+str(i),"role":role,"content":subject+"-"+role}
+                                for i,role in enumerate(("user","assistant"))]
+                    client.request(CONVERSATIONS+"/"+cid,200,"PUT",{"title":subject,"messages":messages})
+                if fixture_mode == "--record-fixture":
+                    record(docker, prefix+"-old", BASELINE, ids, shared_id, clients, signing_key)
+        else:
+            ids, shared_id = restore(docker, candidate, volumes[0], BASELINE, clients, shared, signing_key)
         with service(candidate,prefix+"-new",volumes[0],prefix,env) as base:
             shared.base = base
             assert shared.request(AUTH+"status")["authMethod"] == "access_token"
@@ -202,11 +226,19 @@ def verify(candidate):
             bob.request(CONVERSATIONS+"/"+cid,404)
             alice.oidc("alice")
             assert alice.request(CONVERSATIONS+"/"+cid)["title"] == "fresh"
-        print("PASS: real 1.19.2 → candidate, old OIDC cookies, two owners, history, new writes, restart and fresh inject login")
+        origin = "live store container" if live else "recorded store database"
+        print(f"PASS: 1.19.2 ({origin}) → candidate, OIDC, owner isolation, history, restart and fresh inject")
 
 
 if __name__ == "__main__":
     if sys.argv[1] == "issuer":
         ThreadingHTTPServer(("0.0.0.0",8099),TestIssuer).serve_forever()
     else:
-        verify(sys.argv[1])
+        import argparse
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("image")
+        mode = parser.add_mutually_exclusive_group()
+        mode.add_argument("--fixture", dest="mode", action="store_const", const="--fixture")
+        mode.add_argument("--record-fixture", dest="mode", action="store_const", const="--record-fixture")
+        args = parser.parse_args()
+        verify(args.image, args.mode)

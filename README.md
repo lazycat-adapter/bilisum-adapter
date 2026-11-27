@@ -14,7 +14,7 @@
 
 打开 [Update BiliSum for LazyCat](https://github.com/lazycat-adapter/bilisum-adapter/actions/workflows/update.yml)，选择 **Run workflow** 和 **main**。勾选 **dry-run** 会验证镜像和升级流程；取消勾选后，如发现符合条件的新版本，会转存经过测试的镜像、生成 LPK 并送审。工作流每天北京时间 **12:37** 定时检查，GitHub 的实际排队时间可能有延迟。可以在 [Releases](https://github.com/lazycat-adapter/bilisum-adapter/releases) 查看已生成的版本包。
 
-工作流通过 `secrets: inherit` 使用组织的 `LZC_API_TOKEN`。开发者需要在懒猫平台拥有该包的协作者权限。每次打包由共享执行器替换清单里的镜像为 `registry.lazycat.cloud` 的转存结果。仓库中的初始清单引用真实的旧镜像和旧包版本，正式打包会对照升级测试的镜像凭证，核对转存摘要与镜像 ID。缺少凭证时，直接运行 `lzc-cli project build` 会停止。生成候选版本请使用工作流。
+工作流通过 `secrets: inherit` 使用组织的 `LZC_API_TOKEN`。开发者需要在懒猫平台拥有该包的协作者权限。每次打包由共享执行器替换清单里的镜像为 `registry.lazycat.cloud` 的转存结果。仓库中的初始清单引用真实的旧镜像和旧包版本，正式打包会对照升级测试的镜像凭证，核对通过测试的暂存镜像摘要、官方转存引用和应用版本。缺少凭证时，直接运行 `lzc-cli project build` 会停止。生成候选版本请使用工作流。
 
 ## 本地验证
 
@@ -22,9 +22,12 @@
 
 ```sh
 node --test tests/login.test.cjs
+python3 -B tests/test_delivery.py
 LAZYCAT_SOURCE_VERSION=1.21.3 python3 scripts/prepare.py --verify-only
 ```
 
-镜像内执行后端测试。随后启动真实旧商店容器，在模拟的 OIDC 服务下建立两个身份和多轮对话，让新容器接管相同数据卷，并检验重启、两种登录方式和用户隔离。真实微服的文件选择器还应手工测试本地文件、个人网盘和有写权限的共享目录。
+镜像内执行后端测试。随后启动真实旧商店容器，在模拟的 OIDC 服务下建立两个身份和多轮对话，让新容器接管相同数据卷，并检验重启、两种登录方式和用户隔离。如果旧仓库拒绝 Runner 的拉取权限，工作流会用该旧容器通过真实 API 写出的测试数据库重放同一套升级断言。样本只含虚构的用户和对话，测试会话在每次运行时重新签发。网络异常或升级断言失败会终止工作流。
+
+真实微服的文件选择器还应手工测试本地文件、个人网盘和有写权限的共享目录。
 
 可复用登录组件的接入说明见 [登录组件](docs/login-compat.md)。文件选择器脚本来自[懒猫官方的文件选择器文档](https://developer.lazycat.cloud/lazycat-file-picker-auto-intercept.html)，并配套同源文件桥接。登录注入遵循[懒猫官方免密登录文档](https://developer.lazycat.cloud/advanced-inject-passwordless-login.html)。

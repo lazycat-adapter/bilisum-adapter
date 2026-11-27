@@ -1,8 +1,8 @@
-"""Check the executor selected and copied exactly the tested image before building an LPK."""
+"""Validate the tested source and the shared executor's official delivery reference."""
 import json
 import re
 
-from prepare import DIGEST, ROOT, output, platform_digest
+from prepare import DIGEST, ROOT
 
 
 def one_field(text, name):
@@ -22,7 +22,11 @@ def check(manifest, package, proof):
     if upstream != [proof["staging"] + "@" + digest]:
         raise ValueError("The executor selected a different staging digest from the upgrade test")
     runtime = one_field(manifest, "image")
-    if not re.fullmatch(r"registry\.lazycat\.cloud/[A-Za-z0-9._:/@-]+", runtime):
+    # The copy API preserves the staging repository name and returns a
+    # content-derived 16-hex tag under the developer's LazyCat namespace.
+    staged_name = proof["staging"].split("/")[1].split(":")[0]
+    official_tag = rf"registry\.lazycat\.cloud/(?:[a-z0-9][a-z0-9._-]*/)+{re.escape(staged_name)}:[0-9a-f]{{16}}"
+    if not re.fullmatch(official_tag, runtime):
         raise ValueError("The runtime image has not been copied to the official registry")
     if (one_field(package, "package") != "cloud.lazycat.app.bilisum1"
             or one_field(package, "version") != proof["application_version"]):
@@ -36,12 +40,9 @@ def main():
         raise SystemExit("Missing upgrade and image-copy receipt. Build the release through lazycat-action.")
     proof = json.loads(receipt.read_text())
     runtime = check((ROOT / "lzc-manifest.yml").read_text(), (ROOT / "package.yml").read_text(), proof)
-    repository = runtime.split("@", 1)[0]
-    manifest = json.loads(output("docker", "buildx", "imagetools", "inspect", "--raw",
-                                 repository + "@" + platform_digest(runtime)))
-    if manifest["config"]["digest"] != proof["image_id"]:
-        raise SystemExit("The official registry image differs from the tested local image")
-    print("Verified the LazyCat registry image against the candidate that passed the upgrade test")
+    # prepare.py checked the config ID of the staged image. LazyCat records
+    # provenance labels during copying, which changes its official config ID.
+    print(f"Verified the tested staging digest and LazyCat delivery reference {runtime}")
 
 
 if __name__ == "__main__":

@@ -45,6 +45,8 @@ jobs:
           persist-credentials: false
       - name: Test the browser login flow
         run: node --test tests/login.test.cjs
+      - name: Verify the package delivery checks
+        run: python3 -B tests/test_delivery.py
       - name: Check developer access to the existing BiliSum package
         env:
           LZC_API_HOST: ${{ secrets.LZC_API_HOST }}

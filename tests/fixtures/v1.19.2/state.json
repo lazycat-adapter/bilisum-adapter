@@ -1,0 +1,29 @@
+{
+  "baseline": "registry.lazycat.cloud/edward/lazycat_9527/bilisum@sha256:5551af52b741087fc105f5cee00c637f8f80e03436409171f8ae7f779c0eb6b2",
+  "sha256": "c220a39a9f1344b97182170f09469808dd52f979eacc9420ed930f03a2647c47",
+  "ids": {
+    "alice": "7cbb0a934bf94cca9f9ef51b00392547",
+    "bob": "03a82fda970747728c4ce7d88720622f"
+  },
+  "shared_id": "0ffe96bf6aab4b3e9de4d77dd0120a85",
+  "oidc_profiles": {
+    "alice": {
+      "sub": "alice",
+      "name": "alice",
+      "email": "",
+      "groups": [
+        "NORMAL"
+      ],
+      "role": "NORMAL"
+    },
+    "bob": {
+      "sub": "bob",
+      "name": "bob",
+      "email": "",
+      "groups": [
+        "NORMAL"
+      ],
+      "role": "NORMAL"
+    }
+  }
+}
